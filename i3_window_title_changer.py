@@ -4,37 +4,57 @@ i3 window title changer is a small daemon for i3wm which connects to it via unix
 listens for new window and title change events and change them to something simple
 based on the user defined patterns in the rules file.
 """
+import configparser
 import os
-import re
-import sys
-import csv
-import enum
 import pprint
+import re
 import subprocess
+import sys
+
 import i3ipc
 
-
 DEFAULT_RULE_PATH = '~/.config/i3/window-title-changer-rules'
+title_rules = []
 
 
-class MatchMethod(enum.Enum):
-    TEXT = 'text'
-    CLASS = 'class'
-    REGEX = 'regex'
+def to_regex(regex):
+    if regex:
+        return re.compile(regex)
+    else:
+        return None
 
 
-# this is a cache for the rules which is filled at start
-# it contains three-tuples of (match method, search phrase, new title)
-title_rules = ()
+def parse_rule(rule, rule_name):
+    r = {'name': rule_name,
+         'class': rule.get('class', None),
+         'class_regex': rule.get('class_regex', None),
+         'title': rule.get('title', None),
+         'title_regex': to_regex(rule.get('title_regex', None)),
+         'new_title': rule.get('new_title', None)}
+
+    if r.get('title') and r.get('title_regex'):
+        raise Exception('only one of "title" and "title_regex" accepted')
+
+    if not r['class'] and not r['title_regex'] and not r['title']:
+        raise Exception(
+            'Either a class, title_regex or title required, but was missing for rule {}'.format(rule_name))
+
+    if r.get('new_title') is None:
+        raise Exception('a new_title is required'.format(rule_name))
+
+    return r
 
 
 def read_rules_file(rules_file):
+    print('Reading rules file:', rules_file)
     global title_rules
     rules_file = os.path.expanduser(rules_file)
-    print('Reading rules file:', rules_file)
-    with open(rules_file) as csvfile:
-        reader = csv.reader(csvfile)
-        title_rules = tuple(rule for rule in reader)
+    config = configparser.ConfigParser()
+    config.read(rules_file)
+    rules = []
+    for rule_name in config.sections():
+        rules.append(parse_rule(config[rule_name], rule_name))
+    title_rules = rules
     pprint.pprint(title_rules)
 
 
@@ -44,23 +64,44 @@ def handle_title_change(i3, event):
     window_class = event.container.window_class
     print('"{}" class={}, id={}'.format(current_title, window_class, window_id))
 
-    for match_method, search_phrase, new_title in title_rules:
-        method = MatchMethod(match_method)
-        if method is MatchMethod.TEXT and search_phrase in current_title:
-            print('Found word "{}" in "{}"'.format(search_phrase, current_title), end='')
-            break
-        elif method is MatchMethod.CLASS and search_phrase == window_class:
-            print('Found "{}" class window: "{}"'.format(window_class, current_title), end='')
-            break
-        elif method is MatchMethod.REGEX and re.search(search_phrase, current_title):
-            print('Matched regex "{}" for "{}"'.format(search_phrase, current_title), end='')
-            break
-    else:
-        return
+    new_title = None
 
-    print(', changing title to "{}"'.format(new_title))
-    window_i3 = i3.get_tree().find_by_id(window_id)
-    window_i3.command('title_format ' + new_title)
+    for rule in title_rules:
+        if rule['class']:
+            if rule['class'] in window_class:
+                new_title = rule['new_title']
+            else:
+                new_title = None
+                continue
+
+        if rule['class_regex']:
+            if re.search(rule['class_regex'], window_class):
+                new_title = rule['new_title']
+            else:
+                new_title = None
+                continue
+
+        if rule['title']:
+            if rule['title'] in current_title:
+                new_title = rule['new_title']
+                break
+            else:
+                new_title = None
+                continue
+
+        if rule['title_regex']:
+            if re.search(rule['title_regex'], current_title):
+                new_title = re.sub(rule['title_regex'], rule['new_title'], current_title)
+                break
+            else:
+                new_title = None
+                continue
+
+    if new_title:
+        print("new_title: {}".format(new_title))
+        window_i3 = i3.get_tree().find_by_id(window_id)
+        if window_i3:
+            window_i3.command('title_format ' + new_title)
 
 
 def on_new_window(i3, event):

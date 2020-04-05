@@ -1,6 +1,17 @@
-# 1. match method, 2. search phrase or regex, 3. new title
-text,urxvt,Terminal
-text,IntelliJ IDEA,IntelliJ
-regex,.*Calendar.*,Calendar
-class,Google-chrome,Chrome
-class,Sublime_text,Sublime
+[intellij]
+# removes project path and current filename
+class = jetbrains-idea
+title_regex = (.*) \[(.*)\] - (.*) - IntelliJ IDEA
+new_title = \1 - IntelliJ
+
+[urxvt]
+title = urxvt
+new_title =  Terminal
+
+[calendar]
+title_regex = .*Calendar.*
+new_title = Calendar
+
+[chrome]
+class=Google-chrome
+new_title = Chrome
